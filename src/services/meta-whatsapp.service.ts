@@ -1,4 +1,4 @@
-import type { WhatsAppAccount } from "@prisma/client";
+import { Prisma, type TemplateCategory, type TemplateStatus, type WhatsAppAccount } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -81,7 +81,8 @@ async function graphRequest<T>(
   accessToken: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${GRAPH_API_BASE_URL}/${path.replace(/^\//, "")}`, {
+  const url = path.startsWith("https://") ? path : `${GRAPH_API_BASE_URL}/${path.replace(/^\//, "")}`;
+  const response = await fetch(url, {
     ...init,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -170,6 +171,33 @@ type MetaSendResponse = {
 };
 
 export type MetaTemplateComponent = Record<string, unknown>;
+
+export type CreateMetaTemplateInput = {
+  name: string;
+  language: string;
+  category: TemplateCategory;
+  components: MetaTemplateComponent[];
+};
+
+type MetaTemplateRecord = {
+  id?: string;
+  name: string;
+  language: string;
+  category: string;
+  status: string;
+  components: MetaTemplateComponent[];
+};
+
+function mapTemplateStatus(status: string): TemplateStatus {
+  if (status === "APPROVED") return "APPROVED";
+  if (["REJECTED", "DISABLED", "PAUSED"].includes(status)) return "REJECTED";
+  return "PENDING";
+}
+
+function mapTemplateCategory(category: string): TemplateCategory {
+  if (category === "MARKETING" || category === "AUTHENTICATION") return category;
+  return "UTILITY";
+}
 
 export class MetaWhatsAppService {
   private async getActiveAccount(accountId: string): Promise<WhatsAppAccount> {
@@ -263,6 +291,99 @@ export class MetaWhatsAppService {
         }),
       },
     );
+  }
+
+  async syncTemplates(accountId: string) {
+    const account = await this.getActiveAccount(accountId);
+    let nextPage: string | undefined = `${encodeURIComponent(account.wabaId)}/message_templates?fields=id,name,language,category,status,components&limit=250`;
+    const remoteTemplates: MetaTemplateRecord[] = [];
+
+    for (let page = 0; nextPage && page < 50; page += 1) {
+      const response: { data: MetaTemplateRecord[]; paging?: { next?: string } } =
+        await graphRequest(nextPage, account.accessToken);
+      remoteTemplates.push(...(response.data ?? []));
+      nextPage = response.paging?.next;
+    }
+    const synced = [];
+
+    for (const template of remoteTemplates) {
+      const saved = await prisma.template.upsert({
+        where: {
+          tenantId_whatsappAccountId_name_language: {
+            tenantId: account.tenantId,
+            whatsappAccountId: account.id,
+            name: template.name,
+            language: template.language,
+          },
+        },
+        create: {
+          tenantId: account.tenantId,
+          whatsappAccountId: account.id,
+          name: template.name,
+          language: template.language,
+          category: mapTemplateCategory(template.category),
+          status: mapTemplateStatus(template.status),
+          components: template.components as Prisma.InputJsonValue,
+          metaTemplateId: template.id,
+        },
+        update: {
+          category: mapTemplateCategory(template.category),
+          status: mapTemplateStatus(template.status),
+          components: template.components as Prisma.InputJsonValue,
+          metaTemplateId: template.id,
+        },
+      });
+      synced.push(saved);
+    }
+
+    return synced;
+  }
+
+  async createTemplate(accountId: string, templateData: CreateMetaTemplateInput) {
+    const account = await this.getActiveAccount(accountId);
+    const response = await graphRequest<{ id: string; status?: string; category?: string }>(
+      `${encodeURIComponent(account.wabaId)}/message_templates`,
+      account.accessToken,
+      { method: "POST", body: JSON.stringify(templateData) },
+    );
+
+    return prisma.template.upsert({
+      where: {
+        tenantId_whatsappAccountId_name_language: {
+          tenantId: account.tenantId,
+          whatsappAccountId: account.id,
+          name: templateData.name,
+          language: templateData.language,
+        },
+      },
+      create: {
+        tenantId: account.tenantId,
+        whatsappAccountId: account.id,
+        ...templateData,
+        components: templateData.components as Prisma.InputJsonValue,
+        status: mapTemplateStatus(response.status ?? "PENDING"),
+        metaTemplateId: response.id,
+      },
+      update: {
+        category: templateData.category,
+        components: templateData.components as Prisma.InputJsonValue,
+        status: mapTemplateStatus(response.status ?? "PENDING"),
+        metaTemplateId: response.id,
+      },
+    });
+  }
+
+  async deleteTemplate(accountId: string, templateName: string) {
+    const account = await this.getActiveAccount(accountId);
+    await graphRequest<{ success: boolean }>(
+      `${encodeURIComponent(account.wabaId)}/message_templates?name=${encodeURIComponent(templateName)}`,
+      account.accessToken,
+      { method: "DELETE" },
+    );
+    await prisma.template.deleteMany({
+      where: { tenantId: account.tenantId, whatsappAccountId: account.id, name: templateName },
+    });
+    return { success: true };
   }
 }
 

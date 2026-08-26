@@ -260,7 +260,7 @@ model Template {
   whatsappAccount   WhatsAppAccount? @relation(fields: [whatsappAccountId, tenantId], references: [id, tenantId], onDelete: Cascade)
   campaigns         Campaign[]
 
-  @@unique([tenantId, name, language])
+  @@unique([tenantId, whatsappAccountId, name, language])
   @@unique([id, tenantId])
   @@index([tenantId])
   @@index([whatsappAccountId])

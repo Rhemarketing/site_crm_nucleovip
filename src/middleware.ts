@@ -46,6 +46,9 @@ export const config = {
     "/dashboard/:path*",
     "/api/internal/:path*",
     "/api/chat/:path*",
+    "/api/contacts/:path*",
+    "/api/tags/:path*",
+    "/api/templates/:path*",
     "/api/whatsapp-accounts/:path*",
   ],
 };

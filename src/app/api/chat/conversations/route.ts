@@ -116,3 +116,28 @@ export async function GET(request: Request) {
     filters: { accounts, users, tags },
   });
 }
+
+export async function POST(request: Request) {
+  const session = await requireCurrentUser();
+  const body = (await request.json().catch(() => null)) as { contactId?: string; whatsappAccountId?: string } | null;
+  if (!body?.contactId || !body.whatsappAccountId) {
+    return NextResponse.json({ error: "contactId e whatsappAccountId sao obrigatorios." }, { status: 400 });
+  }
+  const [contact, account] = await Promise.all([
+    prisma.contact.findFirst({ where: { id: body.contactId, tenantId: session.tenantId }, select: { id: true } }),
+    prisma.whatsAppAccount.findFirst({ where: { id: body.whatsappAccountId, tenantId: session.tenantId, status: "ACTIVE" }, select: { id: true } }),
+  ]);
+  if (!contact || !account) return NextResponse.json({ error: "Contato ou conta nao encontrado." }, { status: 404 });
+  const existing = await prisma.conversation.findFirst({
+    where: { tenantId: session.tenantId, contactId: contact.id, whatsappAccountId: account.id, status: { in: ["OPEN", "PENDING"] } },
+    orderBy: { updatedAt: "desc" },
+  });
+  const conversation = existing
+    ? existing.status === "PENDING"
+      ? await prisma.conversation.update({ where: { id: existing.id }, data: { status: "OPEN" } })
+      : existing
+    : await prisma.conversation.create({
+        data: { tenantId: session.tenantId, contactId: contact.id, whatsappAccountId: account.id, status: "OPEN", is24hWindowActive: false },
+      });
+  return NextResponse.json({ conversation: { id: conversation.id } }, { status: existing ? 200 : 201 });
+}
