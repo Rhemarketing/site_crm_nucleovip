@@ -7,6 +7,8 @@ import { Worker } from "bullmq";
 
 import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
+import { publishChatEvent } from "@/lib/chat-events";
+import { serializeChatMessage } from "@/lib/chat-serializers";
 import {
   WEBHOOK_QUEUE_NAME,
   type WebhookJobData,
@@ -81,7 +83,7 @@ async function processInboundMessage(
   value: MetaWebhookValue,
   message: MetaWebhookMessage,
 ) {
-  if (!message.id || !message.from) return;
+  if (!message.id || !message.from) return null;
 
   const existingMessage = await transaction.message.findUnique({
     where: {
@@ -90,10 +92,14 @@ async function processInboundMessage(
         metaMessageId: message.id,
       },
     },
-    select: { id: true },
   });
 
-  if (existingMessage) return;
+  if (existingMessage) {
+    return {
+      conversationId: existingMessage.conversationId,
+      message: serializeChatMessage(existingMessage),
+    };
+  }
 
   const profileName = getProfileName(value, message.from);
   const contact = await transaction.contact.upsert({
@@ -137,7 +143,7 @@ async function processInboundMessage(
   }
 
   const parsed = getMessageData(message);
-  await transaction.message.create({
+  const createdMessage = await transaction.message.create({
     data: {
       tenantId: data.tenantId,
       conversationId: conversation.id,
@@ -161,6 +167,11 @@ async function processInboundMessage(
       windowExpiresAt,
     },
   });
+
+  return {
+    conversationId: conversation.id,
+    message: serializeChatMessage(createdMessage),
+  };
 }
 
 function mapMessageStatus(status?: string): MessageStatus | null {
@@ -179,15 +190,29 @@ async function processMessageStatus(
   status: MetaWebhookStatus,
 ) {
   const mappedStatus = mapMessageStatus(status.status);
-  if (!status.id || !mappedStatus) return;
+  if (!status.id || !mappedStatus) return null;
 
-  await transaction.message.updateMany({
+  const message = await transaction.message.findFirst({
     where: { tenantId, metaMessageId: status.id },
+    select: { id: true, conversationId: true, metaMessageId: true },
+  });
+
+  if (!message) return null;
+
+  await transaction.message.update({
+    where: { id: message.id },
     data: {
       status: mappedStatus,
       metadata: toJson(status),
     },
   });
+
+  return {
+    messageId: message.id,
+    conversationId: message.conversationId,
+    metaMessageId: message.metaMessageId,
+    status: mappedStatus,
+  };
 }
 
 export async function processWebhookJob(data: WebhookJobData) {
@@ -197,15 +222,52 @@ export async function processWebhookJob(data: WebhookJobData) {
 
       if (value?.metadata?.phone_number_id !== data.phoneNumberId) continue;
 
-      await prisma.$transaction(async (transaction) => {
+      const events = await prisma.$transaction(async (transaction) => {
+        const transactionEvents: Array<
+          | { kind: "message"; result: NonNullable<Awaited<ReturnType<typeof processInboundMessage>>> }
+          | { kind: "status"; result: NonNullable<Awaited<ReturnType<typeof processMessageStatus>>> }
+        > = [];
+
         for (const message of value.messages ?? []) {
-          await processInboundMessage(transaction, data, value, message);
+          const result = await processInboundMessage(transaction, data, value, message);
+          if (result) transactionEvents.push({ kind: "message", result });
         }
 
         for (const status of value.statuses ?? []) {
-          await processMessageStatus(transaction, data.tenantId, status);
+          const result = await processMessageStatus(transaction, data.tenantId, status);
+          if (result) transactionEvents.push({ kind: "status", result });
         }
+
+        return transactionEvents;
       });
+
+      for (const event of events) {
+        const occurredAt = new Date().toISOString();
+
+        if (event.kind === "message") {
+          await Promise.all([
+            publishChatEvent({
+              type: "NEW_MESSAGE",
+              tenantId: data.tenantId,
+              occurredAt,
+              data: event.result,
+            }),
+            publishChatEvent({
+              type: "CONVERSATION_UPDATED",
+              tenantId: data.tenantId,
+              occurredAt,
+              data: { conversationId: event.result.conversationId },
+            }),
+          ]);
+        } else {
+          await publishChatEvent({
+            type: "MESSAGE_STATUS_UPDATED",
+            tenantId: data.tenantId,
+            occurredAt,
+            data: event.result,
+          });
+        }
+      }
     }
   }
 }

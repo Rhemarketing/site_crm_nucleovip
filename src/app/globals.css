@@ -1,9 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   --background: #07130f;
   --foreground: #ecfdf5;
+}
+
+.chat-pattern {
+  background-color: #eef2ef;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgb(16 185 129 / 0.035) 0 1px, transparent 1px),
+    radial-gradient(circle at 80% 70%, rgb(15 23 42 / 0.035) 0 1px, transparent 1px);
+  background-size: 24px 24px, 32px 32px;
 }
 
 body {

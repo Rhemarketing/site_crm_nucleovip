@@ -71,12 +71,12 @@ enum CampaignStatus {
 }
 
 model Tenant {
-  id               String            @id @default(cuid())
+  id               String                   @id @default(cuid())
   name             String
-  document         String?           @unique
-  status           TenantStatus      @default(ACTIVE)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  document         String?                  @unique
+  status           TenantStatus             @default(ACTIVE)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
   users            User[]
   whatsappAccounts WhatsAppAccount[]
   contacts         Contact[]
@@ -87,19 +87,22 @@ model Tenant {
   templates        Template[]
   campaigns        Campaign[]
   botFlows         BotFlow[]
+  assignments      ConversationAssignment[]
 }
 
 model User {
-  id                    String         @id @default(cuid())
+  id                    String                   @id @default(cuid())
   tenantId              String
   name                  String
   email                 String
   passwordHash          String
-  role                  UserRole       @default(AGENT)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedConversations Conversation[] @relation("AssignedUser")
+  role                  UserRole                 @default(AGENT)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  tenant                Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[]           @relation("AssignedUser")
+  receivedAssignments   ConversationAssignment[] @relation("AssignmentTarget")
+  madeAssignments       ConversationAssignment[] @relation("AssignmentAuthor")
 
   @@unique([tenantId, email])
   @@unique([id, tenantId])
@@ -176,23 +179,24 @@ model ContactTag {
 }
 
 model Conversation {
-  id                String             @id @default(cuid())
+  id                String                   @id @default(cuid())
   tenantId          String
   whatsappAccountId String
   contactId         String
   assignedUserId    String?
-  status            ConversationStatus @default(OPEN)
-  lastMessageAt     DateTime           @default(now())
-  unreadCount       Int                @default(0)
-  is24hWindowActive Boolean            @default(false)
+  status            ConversationStatus       @default(OPEN)
+  lastMessageAt     DateTime                 @default(now())
+  unreadCount       Int                      @default(0)
+  is24hWindowActive Boolean                  @default(false)
   windowExpiresAt   DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  whatsappAccount   WhatsAppAccount    @relation(fields: [whatsappAccountId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  contact           Contact            @relation(fields: [contactId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  assignedUser      User?              @relation("AssignedUser", fields: [assignedUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  tenant            Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  whatsappAccount   WhatsAppAccount          @relation(fields: [whatsappAccountId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  contact           Contact                  @relation(fields: [contactId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedUser      User?                    @relation("AssignedUser", fields: [assignedUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
   messages          Message[]
+  assignmentHistory ConversationAssignment[]
 
   @@unique([id, tenantId])
   @@index([tenantId])
@@ -200,6 +204,24 @@ model Conversation {
   @@index([whatsappAccountId])
   @@index([contactId])
   @@index([assignedUserId])
+}
+
+model ConversationAssignment {
+  id               String       @id @default(cuid())
+  tenantId         String
+  conversationId   String
+  assignedUserId   String?
+  assignedByUserId String
+  createdAt        DateTime     @default(now())
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation     Conversation @relation(fields: [conversationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  assignedUser     User?        @relation("AssignmentTarget", fields: [assignedUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  assignedByUser   User         @relation("AssignmentAuthor", fields: [assignedByUserId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([conversationId, createdAt])
+  @@index([assignedUserId])
+  @@index([assignedByUserId])
 }
 
 model Message {

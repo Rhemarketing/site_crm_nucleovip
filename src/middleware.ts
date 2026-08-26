@@ -45,6 +45,7 @@ export const config = {
   matcher: [
     "/dashboard/:path*",
     "/api/internal/:path*",
+    "/api/chat/:path*",
     "/api/whatsapp-accounts/:path*",
   ],
 };
