@@ -217,6 +217,7 @@ model Message {
   tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation   Conversation     @relation(fields: [conversationId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
+  @@unique([tenantId, metaMessageId])
   @@index([tenantId])
   @@index([conversationId, createdAt])
   @@index([metaMessageId])
