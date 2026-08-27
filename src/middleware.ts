@@ -10,7 +10,7 @@ function unauthorized(request: NextRequest) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
 
-  const loginUrl = new URL("/", request.url);
+  const loginUrl = new URL("/login", request.url);
   loginUrl.searchParams.set("next", request.nextUrl.pathname);
   return NextResponse.redirect(loginUrl);
 }

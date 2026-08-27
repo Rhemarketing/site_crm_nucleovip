@@ -336,7 +336,7 @@ export function LiveChat() {
   const groupedMessages = useMemo(() => messages, [messages]);
 
   return (
-    <main className="h-[calc(100dvh-4rem)] overflow-hidden bg-[#eef2f1] text-slate-900">
+    <main className="h-full overflow-hidden bg-[#eef2f1] text-slate-900">
       <div
         className={cn(
           "grid h-full grid-cols-1 bg-white lg:grid-cols-[340px_minmax(420px,1fr)]",
