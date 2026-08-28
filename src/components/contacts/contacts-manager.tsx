@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Tags,
   Trash2,
   Upload,
   UserRoundPlus,
@@ -234,9 +235,12 @@ function ImportModal({
   const [file, setFile] = useState<File | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [report, setReport] = useState<{
-    totalRows: number;
-    imported: number;
+    totalProcessed: number;
+    created: number;
+    updated: number;
     duplicated: number;
     errorCount: number;
     errors: Array<{ row: number; error: string }>;
@@ -245,21 +249,43 @@ function ImportModal({
   async function upload() {
     if (!file) return;
     setLoading(true);
+    setProgress(0);
     setError(null);
     const form = new FormData();
     form.append("file", file);
     tagIds.forEach((id) => form.append("tagIds", id));
     try {
-      const response = await fetch("/api/contacts/import", {
-        method: "POST",
-        body: form,
-      });
-      const data = (await response.json()) as {
-        report?: typeof report;
-        error?: string;
-      };
-      if (!response.ok || !data.report)
-        throw new Error(data.error ?? "Falha na importação.");
+      const data = await new Promise<{ report?: typeof report; error?: string }>(
+        (resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/contacts/import");
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              setProgress(Math.round((event.loaded / event.total) * 85));
+            }
+          };
+          xhr.onload = () => {
+            try {
+              const payload = JSON.parse(xhr.responseText) as {
+                report?: typeof report;
+                error?: string;
+              };
+              if (xhr.status < 200 || xhr.status >= 300) {
+                reject(new Error(payload.error ?? "Falha na importação."));
+                return;
+              }
+              resolve(payload);
+            } catch {
+              reject(new Error("Resposta inválida durante a importação."));
+            }
+          };
+          xhr.onerror = () =>
+            reject(new Error("Falha de conexão durante a importação."));
+          xhr.send(form);
+        },
+      );
+      setProgress(100);
+      if (!data.report) throw new Error(data.error ?? "Falha na importação.");
       setReport(data.report);
       onImported();
     } catch (reason) {
@@ -290,7 +316,28 @@ function ImportModal({
         <div className="space-y-5 p-6">
           {!report ? (
             <>
-              <label className="grid cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center hover:border-emerald-400">
+              <label
+                onDragEnter={() => setDragging(true)}
+                onDragLeave={() => setDragging(false)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  const dropped = event.dataTransfer.files[0];
+                  if (dropped && /\.(csv|xlsx)$/i.test(dropped.name)) {
+                    setFile(dropped);
+                    setError(null);
+                  } else {
+                    setError("Selecione um arquivo CSV ou XLSX.");
+                  }
+                }}
+                className={cn(
+                  "grid cursor-pointer place-items-center rounded-2xl border-2 border-dashed bg-slate-50 px-6 py-10 text-center transition hover:border-emerald-400",
+                  dragging
+                    ? "border-emerald-500 bg-emerald-50"
+                    : "border-slate-200",
+                )}
+              >
                 <FileSpreadsheet className="mb-3 size-9 text-emerald-600" />
                 <strong className="text-sm">
                   {file?.name ?? "Selecione CSV ou XLSX"}
@@ -303,6 +350,20 @@ function ImportModal({
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 />
               </label>
+              {loading && (
+                <div aria-label={`Importação ${progress}%`}>
+                  <div className="mb-1.5 flex justify-between text-xs font-semibold text-slate-500">
+                    <span>Enviando e processando</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-[width] duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               <div>
                 <p className="mb-2 text-xs font-semibold text-slate-600">
                   Aplicar etiquetas em todos
@@ -358,9 +419,9 @@ function ImportModal({
             <div>
               <div className="grid grid-cols-4 gap-3">
                 {[
-                  ["Linhas", report.totalRows],
-                  ["Importados", report.imported],
-                  ["Duplicados", report.duplicated],
+                  ["Processadas", report.totalProcessed],
+                  ["Criados", report.created],
+                  ["Atualizados", report.updated],
                   ["Erros", report.errorCount],
                 ].map(([label, value]) => (
                   <div
@@ -398,6 +459,181 @@ function ImportModal({
   );
 }
 
+function TagsManager({
+  tags,
+  onClose,
+  onChanged,
+}: {
+  tags: Tag[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("#10B981");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setEditingId(null);
+    setName("");
+    setColor("#10B981");
+    setError(null);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        editingId ? `/api/tags/${editingId}` : "/api/tags",
+        {
+          method: editingId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, color }),
+        },
+      );
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error ?? "Não foi possível salvar a etiqueta.");
+      }
+      reset();
+      onChanged();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Não foi possível salvar a etiqueta.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(tag: Tag) {
+    if (!confirm(`Excluir a etiqueta ${tag.name}? Ela será removida dos contatos.`)) {
+      return;
+    }
+    const response = await fetch(`/api/tags/${tag.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string };
+      setError(data.error ?? "Não foi possível excluir a etiqueta.");
+      return;
+    }
+    if (editingId === tag.id) reset();
+    onChanged();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 backdrop-blur-sm">
+      <aside className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-bold">Gerenciar etiquetas</h2>
+            <p className="text-xs text-slate-500">
+              Crie segmentos visuais para sua base.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-slate-100"
+            aria-label="Fechar"
+          >
+            <X className="size-5" />
+          </button>
+        </header>
+        <div className="border-b border-slate-200 p-6">
+          <div className="flex gap-3">
+            <input
+              type="color"
+              value={color}
+              onChange={(event) => setColor(event.target.value.toUpperCase())}
+              className="h-11 w-12 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"
+              aria-label="Cor da etiqueta"
+            />
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Ex.: Cliente VIP"
+              maxLength={50}
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
+            />
+            <button
+              onClick={() => void save()}
+              disabled={saving || !name.trim()}
+              className="rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:bg-slate-300"
+            >
+              {saving ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : editingId ? (
+                "Salvar"
+              ) : (
+                "Criar"
+              )}
+            </button>
+          </div>
+          {editingId && (
+            <button
+              onClick={reset}
+              className="mt-2 text-xs font-semibold text-slate-500 hover:text-slate-800"
+            >
+              Cancelar edição
+            </button>
+          )}
+          {error && (
+            <p className="mt-3 rounded-lg bg-rose-50 p-2.5 text-xs text-rose-700">
+              {error}
+            </p>
+          )}
+        </div>
+        <div className="flex-1 space-y-2 overflow-y-auto p-4">
+          {tags.map((tag) => (
+            <div
+              key={tag.id}
+              className="flex items-center gap-3 rounded-xl border border-slate-100 p-3"
+            >
+              <span
+                className="size-3 rounded-full"
+                style={{ backgroundColor: tag.color }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{tag.name}</p>
+                <p className="text-xs text-slate-400">
+                  {tag.contactCount} contato(s)
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingId(tag.id);
+                  setName(tag.name);
+                  setColor(tag.color);
+                  setError(null);
+                }}
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                aria-label={`Editar ${tag.name}`}
+              >
+                <Pencil className="size-4" />
+              </button>
+              <button
+                onClick={() => void remove(tag)}
+                className="rounded-lg p-2 text-rose-500 hover:bg-rose-50"
+                aria-label={`Excluir ${tag.name}`}
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          ))}
+          {tags.length === 0 && (
+            <p className="py-12 text-center text-sm text-slate-400">
+              Nenhuma etiqueta criada.
+            </p>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 export function ContactsManager() {
   const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -409,6 +645,7 @@ export function ContactsManager() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Contact | "new" | null>(null);
   const [importing, setImporting] = useState(false);
+  const [managingTags, setManagingTags] = useState(false);
   const load = useCallback(async () => {
     const params = new URLSearchParams({ pageSize: "100" });
     if (search) params.set("search", search);
@@ -488,6 +725,13 @@ export function ContactsManager() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setManagingTags(true)}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold hover:bg-slate-50"
+            >
+              <Tags className="size-4" />
+              Etiquetas
+            </button>
             <a
               href={exportUrl}
               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold hover:bg-slate-50"
@@ -677,6 +921,13 @@ export function ContactsManager() {
           tags={tags}
           onClose={() => setImporting(false)}
           onImported={() => void load()}
+        />
+      )}
+      {managingTags && (
+        <TagsManager
+          tags={tags}
+          onClose={() => setManagingTags(false)}
+          onChanged={() => void load()}
         />
       )}
     </main>

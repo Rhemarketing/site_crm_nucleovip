@@ -4,6 +4,17 @@ export const contactInclude = {
   contactTags: {
     select: { tag: { select: { id: true, name: true, color: true } } },
   },
+  conversations: {
+    where: { status: { in: ["OPEN", "PENDING"] } },
+    select: {
+      id: true,
+      status: true,
+      lastMessageAt: true,
+      whatsappAccountId: true,
+    },
+    orderBy: { lastMessageAt: "desc" },
+    take: 1,
+  },
   _count: { select: { conversations: true } },
 } satisfies Prisma.ContactInclude;
 

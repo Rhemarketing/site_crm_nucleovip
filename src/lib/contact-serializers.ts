@@ -8,6 +8,12 @@ type ContactWithRelations = {
   createdAt: Date;
   updatedAt: Date;
   contactTags: Array<{ tag: { id: string; name: string; color: string } }>;
+  conversations?: Array<{
+    id: string;
+    status: string;
+    lastMessageAt: Date;
+    whatsappAccountId: string;
+  }>;
   _count: { conversations: number };
 };
 
@@ -23,5 +29,11 @@ export function serializeContact(contact: ContactWithRelations) {
     updatedAt: contact.updatedAt.toISOString(),
     tags: contact.contactTags.map(({ tag }) => tag),
     conversationCount: contact._count.conversations,
+    activeConversation: contact.conversations?.[0]
+      ? {
+          ...contact.conversations[0],
+          lastMessageAt: contact.conversations[0].lastMessageAt.toISOString(),
+        }
+      : null,
   };
 }

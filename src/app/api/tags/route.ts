@@ -14,7 +14,13 @@ export async function GET() {
     orderBy: { name: "asc" },
   });
   return NextResponse.json({
-    tags: tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color, contactCount: tag._count.contactTags })),
+    tags: tags.map((tag) => ({
+      id: tag.id,
+      name: tag.name,
+      color: tag.color,
+      contactCount: tag._count.contactTags,
+      _count: { contacts: tag._count.contactTags },
+    })),
   });
 }
 

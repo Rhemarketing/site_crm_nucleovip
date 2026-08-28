@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  ImageIcon,
   LayoutTemplate,
   LoaderCircle,
   MessageSquareText,
@@ -23,7 +24,12 @@ type Component = {
   type: string;
   format?: string;
   text?: string;
-  buttons?: Array<{ type: string; text: string; url?: string }>;
+  buttons?: Array<{
+    type: string;
+    text: string;
+    url?: string;
+    phone_number?: string;
+  }>;
 };
 type Template = {
   id: string;
@@ -78,6 +84,16 @@ function TemplatePreview({ components }: { components: Component[] }) {
         {header?.text && (
           <p className="mb-2 font-bold">{highlight(header.text)}</p>
         )}
+        {header && header.format && header.format !== "TEXT" && (
+          <div className="mb-3 grid h-28 place-items-center rounded-lg bg-slate-100 text-slate-400">
+            <div className="text-center">
+              <ImageIcon className="mx-auto mb-1 size-7" />
+              <span className="text-[10px] font-bold uppercase">
+                Cabeçalho {header.format.toLowerCase()}
+              </span>
+            </div>
+          </div>
+        )}
         <p className="whitespace-pre-wrap text-slate-700">
           {highlight(body?.text ?? "Corpo do template")}
         </p>
@@ -115,6 +131,8 @@ function CreateTemplateModal({
     body: "Olá {{1}}, temos uma atualização para você.",
     footer: "",
     buttonText: "",
+    buttonType: "QUICK_REPLY" as "QUICK_REPLY" | "URL" | "PHONE_NUMBER",
+    buttonValue: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +146,16 @@ function CreateTemplateModal({
       ? [
           {
             type: "BUTTONS",
-            buttons: [{ type: "QUICK_REPLY", text: form.buttonText }],
+            buttons: [
+              {
+                type: form.buttonType,
+                text: form.buttonText,
+                ...(form.buttonType === "URL" ? { url: form.buttonValue } : {}),
+                ...(form.buttonType === "PHONE_NUMBER"
+                  ? { phone_number: form.buttonValue }
+                  : {}),
+              },
+            ],
           },
         ]
       : []),
@@ -232,7 +259,22 @@ function CreateTemplateModal({
               />
             </label>
             <label className="sm:col-span-2">
-              <span className="mb-1 block text-xs font-semibold">Corpo</span>
+              <span className="mb-1 flex items-center justify-between text-xs font-semibold">
+                Corpo
+                <button
+                  type="button"
+                  onClick={() => {
+                    const indexes = [...form.body.matchAll(/\{\{(\d+)\}\}/g)].map(
+                      (match) => Number(match[1]),
+                    );
+                    const next = Math.max(0, ...indexes) + 1;
+                    setForm({ ...form, body: `${form.body} {{${next}}}` });
+                  }}
+                  className="text-emerald-700 hover:text-emerald-800"
+                >
+                  + Inserir variável
+                </button>
+              </span>
               <textarea
                 rows={6}
                 value={form.body}
@@ -255,9 +297,29 @@ function CreateTemplateModal({
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
               />
             </label>
+            <label className="sm:col-span-2">
+              <span className="mb-1 block text-xs font-semibold">
+                Tipo do botão
+              </span>
+              <select
+                value={form.buttonType}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    buttonType: event.target.value as typeof form.buttonType,
+                    buttonValue: "",
+                  })
+                }
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+              >
+                <option value="QUICK_REPLY">Resposta rápida</option>
+                <option value="URL">Abrir endereço (URL)</option>
+                <option value="PHONE_NUMBER">Ligar para telefone</option>
+              </select>
+            </label>
             <label>
               <span className="mb-1 block text-xs font-semibold">
-                Botão de resposta
+                Texto do botão
               </span>
               <input
                 value={form.buttonText}
@@ -267,6 +329,25 @@ function CreateTemplateModal({
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
               />
             </label>
+            {form.buttonType !== "QUICK_REPLY" && (
+              <label>
+                <span className="mb-1 block text-xs font-semibold">
+                  {form.buttonType === "URL" ? "Endereço (URL)" : "Telefone"}
+                </span>
+                <input
+                  value={form.buttonValue}
+                  onChange={(event) =>
+                    setForm({ ...form, buttonValue: event.target.value })
+                  }
+                  placeholder={
+                    form.buttonType === "URL"
+                      ? "https://exemplo.com/pedido/{{1}}"
+                      : "+5511999999999"
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+            )}
             {error && (
               <p className="sm:col-span-2 rounded-lg bg-rose-50 p-3 text-xs text-rose-700">
                 {error}

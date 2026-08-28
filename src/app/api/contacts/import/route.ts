@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import Papa from "papaparse";
-import { readSheet } from "read-excel-file/node";
+import * as XLSX from "xlsx";
 
 import { requireCurrentUser } from "@/lib/auth";
 import { ContactValidationError, normalizeEmail, normalizePhone } from "@/lib/contact-validation";
@@ -31,11 +31,17 @@ async function parseFile(file: File): Promise<ImportRow[]> {
   }
 
   if (extension === "xlsx") {
-    const rows = await readSheet(buffer);
-    if (!rows.length) return [];
-    const headers = rows[0].map(normalizeHeader);
-    return rows.slice(1).map((row) =>
-      Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return [];
+    const sheet = workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_json<ImportRow>(sheet, {
+      defval: "",
+      raw: false,
+    }).map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([header, value]) => [normalizeHeader(header), value]),
+      ),
     );
   }
 
@@ -85,7 +91,8 @@ export async function POST(request: Request) {
       })).map((contact) => contact.phone),
     );
     duplicated += existingPhones.size;
-    let imported = 0;
+    let created = 0;
+    let updated = 0;
 
     for (let offset = 0; offset < validRows.length; offset += 100) {
       const batch = validRows.slice(offset, offset + 100);
@@ -102,13 +109,22 @@ export async function POST(request: Request) {
               skipDuplicates: true,
             });
           }
-          if (!existingPhones.has(row.phone)) imported += 1;
+          if (existingPhones.has(row.phone)) updated += 1;
+          else created += 1;
         }
       }, { timeout: 30_000 });
     }
 
     return NextResponse.json({
-      report: { totalRows: rows.length, validRows: validRows.length, imported, duplicated, errorCount: errors.length, errors: errors.slice(0, 100) },
+      report: {
+        totalProcessed: rows.length,
+        created,
+        updated,
+        errors: errors.slice(0, 100),
+        errorCount: errors.length,
+        duplicated,
+        validRows: validRows.length,
+      },
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) console.error("Erro Prisma na importacao", error);
