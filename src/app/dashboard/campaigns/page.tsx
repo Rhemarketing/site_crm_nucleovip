@@ -1,13 +1,7 @@
-import { Send } from "lucide-react";
+import { CampaignsManager } from "@/components/campaigns/campaigns-manager";
 
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+export const dynamic = "force-dynamic";
 
 export default function CampaignsPage() {
-  return (
-    <ComingSoon
-      icon={Send}
-      title="Disparos em Massa"
-      description="Campanhas segmentadas, agendamento e métricas de entrega serão disponibilizados nesta área."
-    />
-  );
+  return <CampaignsManager />;
 }

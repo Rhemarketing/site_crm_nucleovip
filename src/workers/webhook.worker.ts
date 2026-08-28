@@ -1,4 +1,5 @@
 import {
+  CampaignRecipientStatus,
   MessageStatus,
   MessageType,
   Prisma,
@@ -184,6 +185,14 @@ function mapMessageStatus(status?: string): MessageStatus | null {
   return status ? statuses[status] ?? null : null;
 }
 
+const messageStatusRank: Record<MessageStatus | CampaignRecipientStatus, number> = {
+  PENDING: 0,
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4,
+};
+
 async function processMessageStatus(
   transaction: TransactionClient,
   tenantId: string,
@@ -194,24 +203,81 @@ async function processMessageStatus(
 
   const message = await transaction.message.findFirst({
     where: { tenantId, metaMessageId: status.id },
-    select: { id: true, conversationId: true, metaMessageId: true },
+    select: {
+      id: true,
+      conversationId: true,
+      metaMessageId: true,
+      status: true,
+    },
   });
 
   if (!message) return null;
 
-  await transaction.message.update({
-    where: { id: message.id },
-    data: {
-      status: mappedStatus,
-      metadata: toJson(status),
-    },
+  const effectiveStatus =
+    messageStatusRank[mappedStatus] >= messageStatusRank[message.status]
+      ? mappedStatus
+      : message.status;
+
+  if (effectiveStatus !== message.status) {
+    await transaction.message.update({
+      where: { id: message.id },
+      data: {
+        status: mappedStatus,
+        metadata: toJson(status),
+      },
+    });
+  }
+
+  const recipient = await transaction.campaignRecipient.findUnique({
+    where: { messageId: message.id },
   });
+  let campaignProgress = null;
+
+  if (
+    recipient &&
+    recipient.status !== mappedStatus &&
+    messageStatusRank[mappedStatus] >= messageStatusRank[recipient.status]
+  ) {
+    const deliveredIncrement =
+      (mappedStatus === "DELIVERED" || mappedStatus === "READ") &&
+      recipient.status === "SENT"
+        ? 1
+        : 0;
+    const readIncrement = mappedStatus === "READ" && recipient.status !== "READ" ? 1 : 0;
+    const failedIncrement =
+      mappedStatus === "FAILED" && recipient.status !== "FAILED" ? 1 : 0;
+
+    await transaction.campaignRecipient.update({
+      where: { id: recipient.id },
+      data: { status: mappedStatus },
+    });
+    campaignProgress = await transaction.campaign.update({
+      where: { id: recipient.campaignId },
+      data: {
+        ...(deliveredIncrement
+          ? { deliveredCount: { increment: deliveredIncrement } }
+          : {}),
+        ...(readIncrement ? { readCount: { increment: readIncrement } } : {}),
+        ...(failedIncrement ? { failedCount: { increment: failedIncrement } } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        sentCount: true,
+        deliveredCount: true,
+        readCount: true,
+        failedCount: true,
+        totalRecipients: true,
+      },
+    });
+  }
 
   return {
     messageId: message.id,
     conversationId: message.conversationId,
     metaMessageId: message.metaMessageId,
-    status: mappedStatus,
+    status: effectiveStatus,
+    campaignProgress,
   };
 }
 
@@ -266,33 +332,49 @@ export async function processWebhookJob(data: WebhookJobData) {
             occurredAt,
             data: event.result,
           });
+          if (event.result.campaignProgress) {
+            const campaign = event.result.campaignProgress;
+            await publishChatEvent({
+              type: "CAMPAIGN_PROGRESS",
+              tenantId: data.tenantId,
+              occurredAt,
+              data: {
+                campaignId: campaign.id,
+                status: campaign.status,
+                sentCount: campaign.sentCount,
+                deliveredCount: campaign.deliveredCount,
+                readCount: campaign.readCount,
+                failedCount: campaign.failedCount,
+                totalRecipients: campaign.totalRecipients,
+                percentage: campaign.totalRecipients
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        ((campaign.sentCount + campaign.failedCount) /
+                          campaign.totalRecipients) *
+                          100,
+                      ),
+                    )
+                  : 0,
+              },
+            });
+          }
         }
       }
     }
   }
 }
 
-const worker = new Worker<WebhookJobData>(
+export const webhookWorker = new Worker<WebhookJobData>(
   WEBHOOK_QUEUE_NAME,
   (job) => processWebhookJob(job.data),
   { connection: redis, concurrency: 10 },
 );
 
-worker.on("completed", (job) => {
+webhookWorker.on("completed", (job) => {
   console.info("Webhook processado", { jobId: job.id });
 });
 
-worker.on("failed", (job, error) => {
+webhookWorker.on("failed", (job, error) => {
   console.error("Falha ao processar webhook", { jobId: job?.id, error });
 });
-
-async function shutdown(signal: string) {
-  console.info(`Encerrando webhook worker (${signal})`);
-  await worker.close();
-  await redis.quit();
-  await prisma.$disconnect();
-  process.exit(0);
-}
-
-process.once("SIGINT", () => void shutdown("SIGINT"));
-process.once("SIGTERM", () => void shutdown("SIGTERM"));

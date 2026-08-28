@@ -68,6 +68,15 @@ enum CampaignStatus {
   PROCESSING
   COMPLETED
   FAILED
+  CANCELLED
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
 }
 
 model Tenant {
@@ -133,18 +142,19 @@ model WhatsAppAccount {
 }
 
 model Contact {
-  id            String         @id @default(cuid())
-  tenantId      String
-  name          String
-  phone         String
-  email         String?
-  avatarUrl     String?
-  customFields  Json?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contactTags   ContactTag[]
-  conversations Conversation[]
+  id                 String              @id @default(cuid())
+  tenantId           String
+  name               String
+  phone              String
+  email              String?
+  avatarUrl          String?
+  customFields       Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactTags        ContactTag[]
+  conversations      Conversation[]
+  campaignRecipients CampaignRecipient[]
 
   @@unique([tenantId, phone])
   @@unique([id, tenantId])
@@ -267,27 +277,59 @@ model Template {
 }
 
 model Campaign {
-  id                String          @id @default(cuid())
+  id                String              @id @default(cuid())
   tenantId          String
   whatsappAccountId String
   templateId        String
   name              String
-  status            CampaignStatus  @default(DRAFT)
-  totalRecipients   Int             @default(0)
-  sentCount         Int             @default(0)
-  deliveredCount    Int             @default(0)
-  readCount         Int             @default(0)
-  failedCount       Int             @default(0)
+  status            CampaignStatus      @default(DRAFT)
+  totalRecipients   Int                 @default(0)
+  sentCount         Int                 @default(0)
+  deliveredCount    Int                 @default(0)
+  readCount         Int                 @default(0)
+  failedCount       Int                 @default(0)
+  tagIds            Json                @default("[]")
+  variableMappings  Json                @default("{}")
   scheduledAt       DateTime?
-  createdAt         DateTime        @default(now())
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  whatsappAccount   WhatsAppAccount @relation(fields: [whatsappAccountId, tenantId], references: [id, tenantId], onDelete: Restrict)
-  template          Template        @relation(fields: [templateId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  cancelRequestedAt DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  whatsappAccount   WhatsAppAccount     @relation(fields: [whatsappAccountId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  template          Template            @relation(fields: [templateId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  recipients        CampaignRecipient[]
 
+  @@unique([id, tenantId])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([whatsappAccountId])
   @@index([templateId])
+}
+
+model CampaignRecipient {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  campaignId     String
+  contactId      String
+  conversationId String?
+  messageId      String?                 @unique
+  phone          String
+  status         CampaignRecipientStatus @default(PENDING)
+  errorCode      String?
+  errorMessage   String?
+  sentAt         DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  campaign       Campaign                @relation(fields: [campaignId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  contact        Contact                 @relation(fields: [contactId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([campaignId, contactId])
+  @@index([tenantId])
+  @@index([campaignId, status])
+  @@index([contactId])
+  @@index([messageId])
 }
 
 model BotFlow {

@@ -79,4 +79,25 @@ export type ChatEvent =
       tenantId: string;
       occurredAt: string;
       data: { conversationId: string };
+    }
+  | {
+      type: "CAMPAIGN_PROGRESS";
+      tenantId: string;
+      occurredAt: string;
+      data: {
+        campaignId: string;
+        status:
+          | "DRAFT"
+          | "QUEUED"
+          | "PROCESSING"
+          | "COMPLETED"
+          | "FAILED"
+          | "CANCELLED";
+        sentCount: number;
+        deliveredCount: number;
+        readCount: number;
+        failedCount: number;
+        totalRecipients: number;
+        percentage: number;
+      };
     };
