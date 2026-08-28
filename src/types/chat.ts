@@ -1,11 +1,6 @@
 export type ChatMessageStatus = "SENT" | "DELIVERED" | "READ" | "FAILED";
 export type ChatMessageType =
-  | "TEXT"
-  | "IMAGE"
-  | "AUDIO"
-  | "DOCUMENT"
-  | "TEMPLATE"
-  | "INTERACTIVE";
+  "TEXT" | "IMAGE" | "AUDIO" | "DOCUMENT" | "TEMPLATE" | "INTERACTIVE";
 export type ChatConversationStatus = "OPEN" | "PENDING" | "CLOSED";
 
 export type ChatMessageDto = {
@@ -99,5 +94,16 @@ export type ChatEvent =
         failedCount: number;
         totalRecipients: number;
         percentage: number;
+      };
+    }
+  | {
+      type: "PIPELINE_UPDATED";
+      tenantId: string;
+      occurredAt: string;
+      data: {
+        conversationId: string;
+        sourceStageId: string | null;
+        targetStageId: string;
+        newOrder: number;
       };
     };

@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  AUTH_COOKIE_NAME,
-  verifySessionToken,
-} from "@/lib/auth-token";
+import { AUTH_COOKIE_NAME, verifySessionToken } from "@/lib/auth-token";
 
 function unauthorized(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
@@ -50,5 +47,11 @@ export const config = {
     "/api/tags/:path*",
     "/api/templates/:path*",
     "/api/whatsapp-accounts/:path*",
+    "/api/pipeline/:path*",
+    "/api/quick-replies/:path*",
+    "/api/settings/:path*",
+    "/api/team/:path*",
+    "/api/campaigns/:path*",
+    "/api/bot-flows/:path*",
   ],
 };

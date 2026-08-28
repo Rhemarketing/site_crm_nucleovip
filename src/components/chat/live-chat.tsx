@@ -41,6 +41,13 @@ import type {
 type AccountOption = { id: string; name: string; phoneNumberId: string };
 type UserOption = { id: string; name: string; email: string };
 type TagOption = { id: string; name: string; color: string };
+type QuickReply = {
+  id: string;
+  shortcut: string;
+  title: string;
+  content: string;
+  mediaUrl: string | null;
+};
 type ConversationsResponse = {
   conversations: ChatConversationDto[];
   filters: {
@@ -148,6 +155,8 @@ export function LiveChat() {
     tags: [],
   });
   const [draft, setDraft] = useState("");
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [quickReplyIndex, setQuickReplyIndex] = useState(0);
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [mediaType, setMediaType] = useState<"IMAGE" | "AUDIO" | "DOCUMENT">(
     "IMAGE",
@@ -194,6 +203,13 @@ export function LiveChat() {
           : (data.conversations[0]?.id ?? null),
     );
   }, [accountId, search, status]);
+
+  useEffect(() => {
+    fetch("/api/quick-replies")
+      .then((response) => response.json())
+      .then((data) => setQuickReplies(data.replies ?? []))
+      .catch(() => null);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -265,6 +281,27 @@ export function LiveChat() {
   );
 
   const { connected } = useChatStream(handleRealtimeEvent);
+
+  const quickReplyQuery = /^\/([^\s]*)$/.exec(draft)?.[1].toLowerCase();
+  const filteredQuickReplies =
+    quickReplyQuery === undefined
+      ? []
+      : quickReplies
+          .filter(
+            (reply) =>
+              reply.shortcut.includes(quickReplyQuery) ||
+              reply.title.toLowerCase().includes(quickReplyQuery),
+          )
+          .slice(0, 8);
+
+  function selectQuickReply(reply: QuickReply) {
+    setDraft(reply.content.slice(0, 4096));
+    if (reply.mediaUrl) {
+      setMediaUrl(reply.mediaUrl);
+      setAttachmentOpen(true);
+    }
+    setQuickReplyIndex(0);
+  }
 
   async function sendMessage() {
     if (!selected || sending || (!draft.trim() && !mediaUrl.trim())) return;
@@ -591,6 +628,39 @@ export function LiveChat() {
                 </div>
               )}
               <div className="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4">
+                {filteredQuickReplies.length > 0 &&
+                  selected.is24hWindowActive && (
+                    <div className="mx-auto mb-2 max-h-64 max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                      <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Respostas rápidas
+                      </p>
+                      {filteredQuickReplies.map((reply, index) => (
+                        <button
+                          key={reply.id}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectQuickReply(reply)}
+                          className={cn(
+                            "flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left",
+                            index === quickReplyIndex
+                              ? "bg-emerald-50"
+                              : "hover:bg-slate-50",
+                          )}
+                        >
+                          <span className="font-mono text-xs font-bold text-emerald-600">
+                            /{reply.shortcut}
+                          </span>
+                          <span className="min-w-0">
+                            <strong className="block text-xs text-slate-800">
+                              {reply.title}
+                            </strong>
+                            <span className="block truncate text-xs text-slate-500">
+                              {reply.content}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 {attachmentOpen && selected.is24hWindowActive && (
                   <div className="mx-auto mb-2 flex max-w-3xl flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row">
                     <select
@@ -641,10 +711,46 @@ export function LiveChat() {
                   <div className="min-w-0 flex-1">
                     <textarea
                       value={draft}
-                      onChange={(event) =>
-                        setDraft(event.target.value.slice(0, 4096))
-                      }
+                      onChange={(event) => {
+                        setDraft(event.target.value.slice(0, 4096));
+                        setQuickReplyIndex(0);
+                      }}
                       onKeyDown={(event) => {
+                        if (filteredQuickReplies.length) {
+                          if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            setQuickReplyIndex(
+                              (current) =>
+                                (current + 1) % filteredQuickReplies.length,
+                            );
+                            return;
+                          }
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            setQuickReplyIndex(
+                              (current) =>
+                                (current - 1 + filteredQuickReplies.length) %
+                                filteredQuickReplies.length,
+                            );
+                            return;
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setDraft("");
+                            return;
+                          }
+                          if (
+                            (event.key === "Enter" || event.key === "Tab") &&
+                            !event.shiftKey
+                          ) {
+                            event.preventDefault();
+                            selectQuickReply(
+                              filteredQuickReplies[quickReplyIndex] ??
+                                filteredQuickReplies[0],
+                            );
+                            return;
+                          }
+                        }
                         if (event.key === "Enter" && !event.shiftKey) {
                           event.preventDefault();
                           void sendMessage();

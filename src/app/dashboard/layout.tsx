@@ -23,6 +23,7 @@ export default async function DashboardLayout({
     where: {
       id: session.userId,
       tenantId: session.tenantId,
+      isActive: true,
       tenant: { status: "ACTIVE" },
     },
     select: {

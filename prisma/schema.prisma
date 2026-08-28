@@ -97,6 +97,9 @@ model Tenant {
   campaigns        Campaign[]
   botFlows         BotFlow[]
   assignments      ConversationAssignment[]
+  pipelineStages   PipelineStage[]
+  quickReplies     QuickReply[]
+  settings         TenantSettings?
 }
 
 model User {
@@ -106,6 +109,7 @@ model User {
   email                 String
   passwordHash          String
   role                  UserRole                 @default(AGENT)
+  isActive              Boolean                  @default(true)
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   tenant                Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -194,6 +198,8 @@ model Conversation {
   whatsappAccountId String
   contactId         String
   assignedUserId    String?
+  pipelineStageId   String?
+  pipelineOrder     Int                      @default(0)
   status            ConversationStatus       @default(OPEN)
   lastMessageAt     DateTime                 @default(now())
   unreadCount       Int                      @default(0)
@@ -212,6 +218,7 @@ model Conversation {
   messages          Message[]
   assignmentHistory ConversationAssignment[]
   currentBotFlow    BotFlow?                 @relation(fields: [currentBotFlowId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  pipelineStage     PipelineStage?           @relation(fields: [pipelineStageId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@index([tenantId])
@@ -220,6 +227,7 @@ model Conversation {
   @@index([contactId])
   @@index([assignedUserId])
   @@index([currentBotFlowId])
+  @@index([pipelineStageId, pipelineOrder])
 }
 
 model ConversationAssignment {
@@ -355,4 +363,48 @@ model BotFlow {
   @@unique([id, tenantId])
   @@index([tenantId])
   @@index([tenantId, isActive])
+}
+
+model PipelineStage {
+  id            String         @id @default(cuid())
+  tenantId      String
+  name          String
+  color         String
+  order         Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+  @@index([tenantId, order])
+}
+
+model QuickReply {
+  id        String   @id @default(cuid())
+  tenantId  String
+  shortcut  String
+  title     String
+  content   String
+  mediaUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, shortcut])
+  @@index([tenantId])
+}
+
+model TenantSettings {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  businessHours       Json
+  outOfOfficeMessage  String?
+  isOutOfOfficeActive Boolean  @default(false)
+  timezone            String   @default("America/Sao_Paulo")
+  updatedAt           DateTime @updatedAt
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }

@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { publishChatEvent } from "@/lib/chat-events";
 import { serializeChatMessage } from "@/lib/chat-serializers";
+import { isWithinBusinessHours } from "@/lib/business-hours";
 import { prisma } from "@/lib/prisma";
 import { metaWhatsAppService } from "@/services/meta-whatsapp.service";
 import type {
@@ -39,11 +40,7 @@ function normalize(value: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function nextEdge(
-  edges: BotFlowEdge[],
-  nodeId: string,
-  sourceHandle?: string,
-) {
+function nextEdge(edges: BotFlowEdge[], nodeId: string, sourceHandle?: string) {
   return edges.find(
     (edge) =>
       edge.source === nodeId &&
@@ -63,7 +60,9 @@ function getLocalTime() {
     minute: "2-digit",
     hour12: false,
   }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
   const weekdayMap: Record<string, number> = {
     Sun: 0,
     Mon: 1,
@@ -93,6 +92,52 @@ function formatMenu(data: MenuNodeData) {
 }
 
 class BotEngineService {
+  private async processOutOfOffice(conversation: {
+    id: string;
+    tenantId: string;
+    whatsappAccountId: string;
+    botContext: Prisma.JsonValue | null;
+    contact: { id: string; phone: string };
+  }) {
+    const settings = await prisma.tenantSettings.findUnique({
+      where: { tenantId: conversation.tenantId },
+    });
+    if (
+      !settings?.isOutOfOfficeActive ||
+      !settings.outOfOfficeMessage ||
+      isWithinBusinessHours(settings.businessHours, settings.timezone)
+    ) {
+      return false;
+    }
+
+    const context = asContext(conversation.botContext);
+    const lastSentAt =
+      typeof context.outOfOfficeSentAt === "string"
+        ? new Date(context.outOfOfficeSentAt).getTime()
+        : 0;
+    if (Date.now() - lastSentAt >= 24 * 60 * 60 * 1000) {
+      await this.sendMessage({
+        tenantId: conversation.tenantId,
+        conversationId: conversation.id,
+        whatsappAccountId: conversation.whatsappAccountId,
+        phone: conversation.contact.phone,
+        type: "TEXT",
+        text: settings.outOfOfficeMessage,
+        metadata: { automated: true, reason: "OUT_OF_OFFICE" },
+      });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          botContext: {
+            ...context,
+            outOfOfficeSentAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+    return true;
+  }
+
   private async sendMessage(input: {
     tenantId: string;
     conversationId: string;
@@ -118,7 +163,8 @@ class BotEngineService {
             input.type === "IMAGE" ? input.text : undefined,
           );
     const metaMessageId = result.messages[0]?.id;
-    if (!metaMessageId) throw new Error("A Meta não retornou o ID da mensagem do bot.");
+    if (!metaMessageId)
+      throw new Error("A Meta não retornou o ID da mensagem do bot.");
 
     const message = await prisma.$transaction(async (transaction) => {
       const created = await transaction.message.create({
@@ -169,7 +215,8 @@ class BotEngineService {
     const incoming = normalize(messageContent);
     const keywordFlow = flows.find(
       (flow) =>
-        flow.triggerKeyword && incoming.includes(normalize(flow.triggerKeyword)),
+        flow.triggerKeyword &&
+        incoming.includes(normalize(flow.triggerKeyword)),
     );
     if (keywordFlow) return keywordFlow;
 
@@ -178,7 +225,11 @@ class BotEngineService {
       const data = start?.data as StartNodeData | undefined;
       if (data?.triggerType !== "OUTSIDE_HOURS") return false;
       const { weekday, minutes } = getLocalTime();
-      return ![1, 2, 3, 4, 5].includes(weekday) || minutes < 8 * 60 || minutes > 18 * 60;
+      return (
+        ![1, 2, 3, 4, 5].includes(weekday) ||
+        minutes < 8 * 60 ||
+        minutes > 18 * 60
+      );
     });
     return outsideHoursFlow ?? flows.find((flow) => flow.isDefault) ?? null;
   }
@@ -214,7 +265,9 @@ class BotEngineService {
   }) {
     const { data, tenantId, conversationId, contactId } = input;
     if (data.actionType === "ADD_TAG" && data.tagId) {
-      const tag = await prisma.tag.findFirst({ where: { id: data.tagId, tenantId } });
+      const tag = await prisma.tag.findFirst({
+        where: { id: data.tagId, tenantId },
+      });
       if (tag) {
         await prisma.contactTag.upsert({
           where: { contactId_tagId: { contactId, tagId: tag.id } },
@@ -227,7 +280,9 @@ class BotEngineService {
         where: { tenantId, contactId, tagId: data.tagId },
       });
     } else if (data.actionType === "ASSIGN_USER" && data.userId) {
-      const user = await prisma.user.findFirst({ where: { id: data.userId, tenantId } });
+      const user = await prisma.user.findFirst({
+        where: { id: data.userId, tenantId },
+      });
       if (user) {
         await prisma.conversation.update({
           where: { id: conversationId },
@@ -259,7 +314,9 @@ class BotEngineService {
       where: { id: conversationId, tenantId },
       include: { contact: { select: { id: true, phone: true } } },
     });
-    if (!conversation?.botActive) return;
+    if (!conversation) return;
+    if (await this.processOutOfOffice(conversation)) return;
+    if (!conversation.botActive) return;
 
     let flow = conversation.currentBotFlowId
       ? await prisma.botFlow.findFirst({
@@ -282,7 +339,9 @@ class BotEngineService {
       const first = start ? nextEdge(edges, start.id) : null;
       if (!first) return;
       currentNodeId = first.target;
-      context = {};
+      context = context.outOfOfficeSentAt
+        ? { outOfOfficeSentAt: context.outOfOfficeSentAt }
+        : {};
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
@@ -338,7 +397,11 @@ class BotEngineService {
 
     const nodes = asNodes(flow.nodes);
     const edges = asEdges(flow.edges);
-    for (let step = 0; currentNodeId && step < MAX_CONSECUTIVE_NODES; step += 1) {
+    for (
+      let step = 0;
+      currentNodeId && step < MAX_CONSECUTIVE_NODES;
+      step += 1
+    ) {
       const node = nodes.find((item) => item.id === currentNodeId);
       if (!node) break;
 
@@ -404,7 +467,8 @@ class BotEngineService {
           conversation.contact.id,
           tenantId,
         );
-        currentNodeId = nextEdge(edges, node.id, result ? "true" : "false")?.target ?? null;
+        currentNodeId =
+          nextEdge(edges, node.id, result ? "true" : "false")?.target ?? null;
       } else {
         currentNodeId = nextEdge(edges, node.id)?.target ?? null;
       }
@@ -422,7 +486,9 @@ class BotEngineService {
             botActive: false,
             currentBotFlowId: null,
             currentNodeId: null,
-            botContext: Prisma.JsonNull,
+            botContext: context.outOfOfficeSentAt
+              ? ({ outOfOfficeSentAt: context.outOfOfficeSentAt } as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
           },
     });
     await publishChatEvent({

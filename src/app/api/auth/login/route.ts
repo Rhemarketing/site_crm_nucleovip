@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  createSessionToken,
-  verifyPassword,
-} from "@/lib/auth";
-import {
-  AUTH_COOKIE_NAME,
-  SESSION_DURATION_SECONDS,
-} from "@/lib/auth-token";
+import { createSessionToken, verifyPassword } from "@/lib/auth";
+import { AUTH_COOKIE_NAME, SESSION_DURATION_SECONDS } from "@/lib/auth-token";
 import { prisma } from "@/lib/prisma";
 
 type LoginBody = {
@@ -41,6 +35,7 @@ export async function POST(request: Request) {
   const users = await prisma.user.findMany({
     where: {
       email,
+      isActive: true,
       tenant: {
         status: "ACTIVE",
         ...(tenantId ? { id: tenantId } : {}),
@@ -53,7 +48,10 @@ export async function POST(request: Request) {
 
   if (users.length > 1) {
     return NextResponse.json(
-      { error: "Informe tenantId ou tenantDocument para selecionar a organizacao." },
+      {
+        error:
+          "Informe tenantId ou tenantDocument para selecionar a organizacao.",
+      },
       { status: 409 },
     );
   }

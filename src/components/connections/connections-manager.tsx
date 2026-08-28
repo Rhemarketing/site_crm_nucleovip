@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
+import { EmbeddedSignupButton } from "@/components/connections/embedded-signup-button";
 
 type Account = {
   id: string;
@@ -404,13 +405,16 @@ export function ConnectionsManager() {
               de cada conta.
             </p>
           </div>
-          <button
-            onClick={() => setCreating(true)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/15 hover:bg-emerald-700"
-          >
-            <Plus className="size-4" />
-            Nova conexão
-          </button>
+          <div className="flex flex-wrap items-start gap-2">
+            <EmbeddedSignupButton onConnected={() => void load()} />
+            <button
+              onClick={() => setCreating(true)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/15 hover:bg-emerald-700"
+            >
+              <Plus className="size-4" />
+              Conexão manual
+            </button>
+          </div>
         </div>
         {error && (
           <div className="mt-5 flex items-center justify-between rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">

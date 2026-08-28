@@ -2,15 +2,20 @@
 
 import {
   Bot,
+  Columns3,
   FileText,
+  LayoutDashboard,
   LogOut,
   Menu,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Send,
+  Settings,
   Smartphone,
+  UserRoundCog,
   Users,
+  Zap,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -29,7 +34,14 @@ type DashboardUser = {
 };
 
 const navigation = [
+  {
+    href: "/dashboard",
+    label: "Visão geral",
+    icon: LayoutDashboard,
+    exact: true,
+  },
   { href: "/dashboard/chat", label: "Live Chat", icon: MessageSquare },
+  { href: "/dashboard/kanban", label: "Funil Kanban", icon: Columns3 },
   {
     href: "/dashboard/connections",
     label: "Conexões WhatsApp",
@@ -41,9 +53,11 @@ const navigation = [
     href: "/dashboard/campaigns",
     label: "Disparos em Massa",
     icon: Send,
-    soon: true,
   },
-  { href: "/dashboard/bot", label: "Automações / Bot", icon: Bot, soon: true },
+  { href: "/dashboard/bot", label: "Automações / Bot", icon: Bot },
+  { href: "/dashboard/quick-replies", label: "Respostas rápidas", icon: Zap },
+  { href: "/dashboard/team", label: "Equipe", icon: UserRoundCog },
+  { href: "/dashboard/settings", label: "Configurações", icon: Settings },
 ];
 
 function initials(name: string) {
@@ -79,13 +93,13 @@ export function DashboardShell({
     <aside
       className={cn(
         "flex h-full flex-col border-r border-slate-800 bg-[#091711] text-white transition-[width] duration-200",
-      "w-[272px]",
-      collapsed ? "lg:w-[78px]" : "lg:w-[272px]",
+        "w-[272px]",
+        collapsed ? "lg:w-[78px]" : "lg:w-[272px]",
       )}
     >
       <div className="flex h-20 shrink-0 items-center justify-between border-b border-white/10 px-4">
         <Link
-          href="/dashboard/chat"
+          href="/dashboard"
           onClick={() => setMobileOpen(false)}
           className="flex min-w-0 items-center gap-3"
         >
@@ -134,8 +148,10 @@ export function DashboardShell({
         )}
       </div>
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
-        {navigation.map(({ href, label, icon: Icon, soon }) => {
-          const active = pathname === href || pathname.startsWith(`${href}/`);
+        {navigation.map(({ href, label, icon: Icon, exact }) => {
+          const active = exact
+            ? pathname === href
+            : pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={href}
@@ -154,18 +170,6 @@ export function DashboardShell({
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {soon && (
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase",
-                        active
-                          ? "bg-emerald-950/15"
-                          : "bg-white/10 text-white/35",
-                      )}
-                    >
-                      Em breve
-                    </span>
-                  )}
                 </>
               )}
             </Link>
