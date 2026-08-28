@@ -1,13 +1,7 @@
-import { Bot } from "lucide-react";
+import { BotFlowsManager } from "@/components/bot/bot-flows-manager";
 
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+export const dynamic = "force-dynamic";
 
 export default function BotPage() {
-  return (
-    <ComingSoon
-      icon={Bot}
-      title="Automações e Bot"
-      description="Construa fluxos automáticos e respostas inteligentes para sua operação de atendimento."
-    />
-  );
+  return <BotFlowsManager />;
 }

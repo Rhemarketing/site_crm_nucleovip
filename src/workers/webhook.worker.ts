@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
 import { publishChatEvent } from "@/lib/chat-events";
 import { serializeChatMessage } from "@/lib/chat-serializers";
+import { botEngineService } from "@/services/bot-engine.service";
 import {
   WEBHOOK_QUEUE_NAME,
   type WebhookJobData,
@@ -99,6 +100,7 @@ async function processInboundMessage(
     return {
       conversationId: existingMessage.conversationId,
       message: serializeChatMessage(existingMessage),
+      isNew: false,
     };
   }
 
@@ -172,6 +174,7 @@ async function processInboundMessage(
   return {
     conversationId: conversation.id,
     message: serializeChatMessage(createdMessage),
+    isNew: true,
   };
 }
 
@@ -325,6 +328,20 @@ export async function processWebhookJob(data: WebhookJobData) {
               data: { conversationId: event.result.conversationId },
             }),
           ]);
+          if (event.result.isNew) {
+            try {
+              await botEngineService.processIncomingMessage(
+                data.tenantId,
+                event.result.conversationId,
+                event.result.message.content,
+              );
+            } catch (error) {
+              console.error("Falha ao executar fluxo do bot", {
+                conversationId: event.result.conversationId,
+                error,
+              });
+            }
+          }
         } else {
           await publishChatEvent({
             type: "MESSAGE_STATUS_UPDATED",
